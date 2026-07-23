@@ -13,41 +13,15 @@ import type {
   AppData,
   Customer,
   Movement,
-  Note,
   Product,
   ProductColor,
   Sale,
   SaleItem,
   Settings,
 } from "./types"
+import { createDefaultData, normalizeData, STORAGE_KEY, uid } from "./app-data"
 
-const STORAGE_KEY = "inventario-deditos-v1"
-
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36)
-}
-
-const defaultData: AppData = {
-  products: [
-    { id: uid(), name: "Bandejas de Deditos", quantity: 5, price: 0, color: "amber", order: 0 },
-    { id: uid(), name: "Bandejas de Bocadillo", quantity: 6, price: 0, color: "rose", order: 1 },
-    { id: uid(), name: "Empanadas de Carne", quantity: 8, price: 0, color: "orange", order: 2 },
-    { id: uid(), name: "Empanadas de Pollo", quantity: 4, price: 0, color: "green", order: 3 },
-    { id: uid(), name: "Bandejas Mixtas", quantity: 2, price: 0, color: "teal", order: 4 },
-  ],
-  movements: [],
-  notes: [
-    { id: uid(), text: "Comprar queso y harina", done: false, timestamp: Date.now() },
-  ],
-  sales: [],
-  customers: [],
-  settings: {
-    businessName: "Mi Negocio",
-    currency: "$",
-    lowStockThreshold: 3,
-  },
-  theme: "light",
-}
+const defaultData: AppData = createDefaultData()
 
 interface StoreContextValue {
   data: AppData
@@ -74,6 +48,7 @@ interface StoreContextValue {
   // settings & theme
   updateSettings: (patch: Partial<Settings>) => void
   toggleTheme: () => void
+  resetAppData: () => void
   // movements
   clearMovements: () => void
 }
@@ -85,13 +60,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const firstLoad = useRef(true)
 
+  const restoreDefaults = () => {
+    const fresh = createDefaultData()
+    setData(fresh)
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      // ignore storage errors
+    }
+    return fresh
+  }
+
   // load
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
-        const parsed = JSON.parse(raw) as AppData
-        setData({ ...defaultData, ...parsed, settings: { ...defaultData.settings, ...parsed.settings } })
+        const parsed = JSON.parse(raw) as Partial<AppData>
+        setData(normalizeData(parsed))
       }
     } catch {
       // ignore corrupt data
@@ -143,10 +129,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ],
         })),
       updateProduct: (id, patch) =>
-        setData((d) => ({
-          ...d,
-          products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-        })),
+        setData((d) => {
+          const product = d.products.find((p) => p.id === id)
+          if (!product) return d
+
+          const nextQuantity = patch.quantity ?? product.quantity
+          const delta = nextQuantity - product.quantity
+          const productName = patch.name ?? product.name
+          const movements =
+            delta !== 0
+              ? [
+                  {
+                    id: uid(),
+                    productId: id,
+                    productName,
+                    delta,
+                    reason: "Ajuste",
+                    note: "Edición de producto",
+                    timestamp: Date.now(),
+                  } as Movement,
+                  ...d.movements,
+                ].slice(0, 500)
+              : d.movements
+
+          return {
+            ...d,
+            products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+            movements,
+          }
+        }),
       deleteProduct: (id) =>
         setData((d) => ({ ...d, products: d.products.filter((p) => p.id !== id) })),
       reorderProduct: (id, direction) =>
@@ -158,10 +169,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (swapWith < 0 || swapWith >= sorted.length) return d
           const a = sorted[idx]
           const b = sorted[swapWith]
-          const aOrder = a.order
-          a.order = b.order
-          b.order = aOrder
-          return { ...d, products: [...sorted] }
+          return {
+            ...d,
+            products: d.products.map((p) => {
+              if (p.id === a.id) return { ...p, order: b.order }
+              if (p.id === b.id) return { ...p, order: a.order }
+              return p
+            }),
+          }
         }),
       adjustQuantity: (id, delta, reason, note) => {
         const product = data.products.find((p) => p.id === id)
@@ -174,12 +189,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }))
         recordMovement({ productId: id, productName: product.name, delta, reason, note })
       },
-      setQuantity: (id, value, reason = "Ajuste") =>
+      setQuantity: (id, value, reason = "Ajuste") => {
+        const product = data.products.find((p) => p.id === id)
+        if (!product) return
+        const newVal = Math.max(0, value)
+        const delta = newVal - product.quantity
         setData((d) => {
-          const product = d.products.find((p) => p.id === id)
-          if (!product) return d
-          const newVal = Math.max(0, value)
-          const delta = newVal - product.quantity
           const movements =
             delta !== 0
               ? [
@@ -199,7 +214,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             products: d.products.map((p) => (p.id === id ? { ...p, quantity: newVal } : p)),
             movements,
           }
-        }),
+        })
+      },
       addNote: (text) =>
         setData((d) => ({
           ...d,
@@ -245,7 +261,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       },
       deleteSale: (id) =>
-        setData((d) => ({ ...d, sales: d.sales.filter((s) => s.id !== id) })),
+        setData((d) => {
+          const sale = d.sales.find((s) => s.id === id)
+          if (!sale) return d
+
+          const products = d.products.map((p) => {
+            const item = sale.items.find((i) => i.productId === p.id)
+            return item ? { ...p, quantity: p.quantity + item.quantity } : p
+          })
+
+          const movements = sale.items.map(
+            (i) =>
+              ({
+                id: uid(),
+                productId: i.productId,
+                productName: i.productName,
+                delta: i.quantity,
+                reason: "Ajuste",
+                note: sale.customerName
+                  ? `Anulación de venta: ${sale.customerName}`
+                  : "Anulación de venta",
+                timestamp: Date.now(),
+              }) as Movement,
+          )
+
+          return {
+            ...d,
+            sales: d.sales.filter((s) => s.id !== id),
+            products,
+            movements: [...movements, ...d.movements].slice(0, 500),
+          }
+        }),
       addCustomer: (c) =>
         setData((d) => ({ ...d, customers: [...d.customers, { ...c, id: uid() }] })),
       updateCustomer: (id, patch) =>
@@ -254,11 +300,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           customers: d.customers.map((c) => (c.id === id ? { ...c, ...patch } : c)),
         })),
       deleteCustomer: (id) =>
-        setData((d) => ({ ...d, customers: d.customers.filter((c) => c.id !== id) })),
+        setData((d) => ({
+          ...d,
+          customers: d.customers.filter((c) => c.id !== id),
+        })),
       updateSettings: (patch) =>
         setData((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
       toggleTheme: () =>
         setData((d) => ({ ...d, theme: d.theme === "dark" ? "light" : "dark" })),
+      resetAppData: () => restoreDefaults(),
       clearMovements: () => setData((d) => ({ ...d, movements: [] })),
     }
   }, [data, ready])

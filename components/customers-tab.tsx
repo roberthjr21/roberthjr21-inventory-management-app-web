@@ -60,7 +60,7 @@ export function CustomersTab() {
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
-      <Button className="h-12 rounded-2xl text-base" onClick={openNew}>
+      <Button type="button" className="h-12 rounded-2xl text-base" onClick={openNew}>
         <UserPlus className="size-5" />
         Nuevo cliente
       </Button>
@@ -80,6 +80,7 @@ export function CustomersTab() {
         {data.customers.map((c) => (
           <button
             key={c.id}
+            type="button"
             onClick={() => openEdit(c)}
             className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
           >

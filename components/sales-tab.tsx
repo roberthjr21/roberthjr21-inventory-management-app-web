@@ -20,6 +20,7 @@ import { toast } from "sonner"
 
 export function SalesTab() {
   const { data, addSale, deleteSale } = useStore()
+  const currency = data.settings.currency
   const [open, setOpen] = useState(false)
   const [customerName, setCustomerName] = useState("")
   const [cart, setCart] = useState<Record<string, number>>({})
@@ -31,12 +32,14 @@ export function SalesTab() {
 
   const totalItems = Object.values(cart).reduce((a, b) => a + b, 0)
 
+  const productMap = useMemo(() => new Map(data.products.map((product) => [product.id, product])), [data.products])
+
   const cartTotal = useMemo(() => {
     return Object.entries(cart).reduce((sum, [productId, quantity]) => {
-      const p = data.products.find((x) => x.id === productId)
+      const p = productMap.get(productId)
       return sum + (p?.price ?? 0) * quantity
     }, 0)
-  }, [cart, data.products])
+  }, [cart, productMap])
 
   const setQty = (id: string, qty: number) => {
     setCart((c) => {
@@ -53,16 +56,18 @@ export function SalesTab() {
   }
 
   const handleSave = () => {
-    const items: SaleItem[] = Object.entries(cart).map(([productId, quantity]) => {
-      const p = data.products.find((x) => x.id === productId)
-      return { productId, productName: p?.name ?? "", quantity }
-    })
+    const items: SaleItem[] = Object.entries(cart).reduce<SaleItem[]>((acc, [productId, quantity]) => {
+      if (quantity <= 0) return acc
+      const p = productMap.get(productId)
+      acc.push({ productId, productName: p?.name ?? "", quantity })
+      return acc
+    }, [])
     if (items.length === 0) {
       toast.error("Agrega al menos un producto a la venta")
       return
     }
     const overstock = items.find((item) => {
-      const p = data.products.find((x) => x.id === item.productId)
+      const p = productMap.get(item.productId)
       return !p || item.quantity > p.quantity
     })
     if (overstock) {
@@ -130,7 +135,7 @@ export function SalesTab() {
                       <span className="text-muted-foreground"> x{item.quantity}</span>
                     </div>
                     <span className="font-medium tabular-nums text-foreground">
-                      ${itemTotal.toLocaleString()}
+                      {currency}{itemTotal.toLocaleString()}
                     </span>
                   </li>
                 )
@@ -141,7 +146,7 @@ export function SalesTab() {
                 <div className="flex justify-between text-sm font-semibold">
                   <span>Total:</span>
                   <span className="tabular-nums">
-                    ${sale.items
+                    {currency}{sale.items
                       .reduce((sum, item) => {
                         const p = data.products.find((x) => x.id === item.productId)
                         return sum + (p?.price ?? 0) * item.quantity
@@ -159,7 +164,7 @@ export function SalesTab() {
         <div className="mt-4 flex items-center justify-between border-t-2 border-border bg-card px-4 py-4 rounded-2xl">
           <span className="text-base font-bold">Total general:</span>
           <span className="text-2xl font-bold tabular-nums text-primary">
-            ${data.sales
+            {currency}{data.sales
               .reduce((sum, sale) => {
                 return sum + sale.items.reduce((saleSum, item) => {
                   const p = data.products.find((x) => x.id === item.productId)
@@ -209,10 +214,11 @@ export function SalesTab() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium leading-tight">{p.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        ${(p.price || 0).toLocaleString()} · Disponible: {p.quantity}
+                        {currency}{(p.price || 0).toLocaleString()} · Disponible: {p.quantity}
                       </p>
                     </div>
                     <Button
+                      type="button"
                       variant="outline"
                       size="icon"
                       className="size-8 shrink-0 rounded-lg"
@@ -224,6 +230,7 @@ export function SalesTab() {
                     </Button>
                     <span className="w-6 text-center font-semibold tabular-nums">{qty}</span>
                     <Button
+                      type="button"
                       variant="outline"
                       size="icon"
                       className="size-8 shrink-0 rounded-lg"
@@ -244,7 +251,7 @@ export function SalesTab() {
               <div>
                 <p className="text-xs text-muted-foreground">Total de la venta</p>
                 <p className="text-2xl font-bold tabular-nums">
-                  ${cartTotal.toLocaleString()}
+                  {currency}{cartTotal.toLocaleString()}
                 </p>
               </div>
               <div className="text-right">
@@ -257,7 +264,7 @@ export function SalesTab() {
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSave}>
+            <Button type="button" onClick={handleSave}>
               Registrar{totalItems > 0 ? ` (${totalItems})` : ""}
             </Button>
           </DialogFooter>

@@ -14,7 +14,7 @@ export function formatDate(ts: number) {
   })
 }
 
-export function formatShortDate(ts: number) {
+function formatShortDate(ts: number) {
   return new Date(ts).toLocaleDateString("es-CO", {
     day: "2-digit",
     month: "2-digit",
@@ -22,7 +22,7 @@ export function formatShortDate(ts: number) {
   })
 }
 
-export function isToday(ts: number) {
+function isToday(ts: number) {
   const d = new Date(ts)
   const now = new Date()
   return (

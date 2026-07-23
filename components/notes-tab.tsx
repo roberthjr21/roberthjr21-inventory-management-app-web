@@ -18,31 +18,39 @@ export function NotesTab() {
     setText("")
   }
 
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    handleAdd()
+  }
+
   const pending = data.notes.filter((n) => !n.done)
   const done = data.notes.filter((n) => n.done)
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
-      <div className="flex gap-2">
+      <form className="flex gap-2" onSubmit={handleSubmit}>
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") handleAdd()
+            if (e.key === "Enter") {
+              e.preventDefault()
+              handleAdd()
+            }
           }}
           placeholder="Escribe una nota o recordatorio..."
           className="h-12 rounded-2xl text-base"
           aria-label="Nueva nota"
         />
         <Button
+          type="submit"
           size="icon"
           className="size-12 shrink-0 rounded-2xl"
-          onClick={handleAdd}
           aria-label="Agregar nota"
         >
           <Plus className="size-5" />
         </Button>
-      </div>
+      </form>
 
       {data.notes.length === 0 && (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed p-10 text-center text-muted-foreground">
@@ -86,6 +94,7 @@ function NoteRow({
   return (
     <div className="flex items-center gap-3 rounded-2xl border bg-card p-3">
       <button
+        type="button"
         onClick={onToggle}
         aria-label={done ? "Marcar como pendiente" : "Marcar como hecho"}
         className={cn(

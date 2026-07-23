@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useReducer } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -23,35 +23,76 @@ interface Props {
   product?: Product | null
 }
 
+type FormState = {
+  name: string
+  quantity: string
+  price: string
+  color: ProductColor
+  category: string
+}
+
+type FormAction =
+  | { type: "reset"; product?: Product | null }
+  | { type: "set-name"; value: string }
+  | { type: "set-quantity"; value: string }
+  | { type: "set-price"; value: string }
+  | { type: "set-color"; value: ProductColor }
+  | { type: "set-category"; value: string }
+
+const initialFormState: FormState = {
+  name: "",
+  quantity: "0",
+  price: "0",
+  color: "amber",
+  category: "",
+}
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case "reset":
+      return {
+        name: action.product?.name ?? "",
+        quantity: String(action.product?.quantity ?? 0),
+        price: String(action.product?.price ?? 0),
+        color: action.product?.color ?? "amber",
+        category: action.product?.category ?? "",
+      }
+    case "set-name":
+      return { ...state, name: action.value }
+    case "set-quantity":
+      return { ...state, quantity: action.value }
+    case "set-price":
+      return { ...state, price: action.value }
+    case "set-color":
+      return { ...state, color: action.value }
+    case "set-category":
+      return { ...state, category: action.value }
+    default:
+      return state
+  }
+}
+
 export function ProductFormDialog({ open, onOpenChange, product }: Props) {
   const { addProduct, updateProduct, deleteProduct } = useStore()
-  const [name, setName] = useState("")
-  const [quantity, setQuantity] = useState("0")
-  const [price, setPrice] = useState("0")
-  const [color, setColor] = useState<ProductColor>("amber")
-  const [category, setCategory] = useState("")
+  const [form, dispatch] = useReducer(formReducer, initialFormState)
 
   const editing = Boolean(product)
 
   useEffect(() => {
     if (open) {
-      setName(product?.name ?? "")
-      setQuantity(String(product?.quantity ?? 0))
-      setPrice(String(product?.price ?? 0))
-      setColor(product?.color ?? "amber")
-      setCategory(product?.category ?? "")
+      dispatch({ type: "reset", product })
     }
   }, [open, product])
 
   const handleSave = () => {
-    const trimmed = name.trim()
+    const trimmed = form.name.trim()
     if (!trimmed) return
-    const qty = Math.max(0, Number.parseInt(quantity, 10) || 0)
-    const priceNum = Math.max(0, Number.parseInt(price, 10) || 0)
+    const qty = Math.max(0, Number.parseInt(form.quantity, 10) || 0)
+    const priceNum = Math.max(0, Number.parseInt(form.price, 10) || 0)
     if (editing && product) {
-      updateProduct(product.id, { name: trimmed, quantity: qty, price: priceNum, color, category: category.trim() || undefined })
+      updateProduct(product.id, { name: trimmed, quantity: qty, price: priceNum, color: form.color, category: form.category.trim() || undefined })
     } else {
-      addProduct({ name: trimmed, quantity: qty, price: priceNum, color, category: category.trim() || undefined })
+      addProduct({ name: trimmed, quantity: qty, price: priceNum, color: form.color, category: form.category.trim() || undefined })
     }
     onOpenChange(false)
   }
@@ -78,8 +119,8 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Label htmlFor="product-name">Nombre</Label>
             <Input
               id="product-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={form.name}
+              onChange={(e) => dispatch({ type: "set-name", value: e.target.value })}
               placeholder="Ej. Bandejas de Deditos"
               autoFocus
             />
@@ -90,8 +131,8 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Input
               id="product-qty"
               inputMode="numeric"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value.replace(/[^0-9]/g, ""))}
+              value={form.quantity}
+              onChange={(e) => dispatch({ type: "set-quantity", value: e.target.value.replace(/[^0-9]/g, "") })}
             />
           </div>
 
@@ -100,8 +141,8 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Input
               id="product-price"
               inputMode="numeric"
-              value={price}
-              onChange={(e) => setPrice(e.target.value.replace(/[^0-9]/g, ""))}
+              value={form.price}
+              onChange={(e) => dispatch({ type: "set-price", value: e.target.value.replace(/[^0-9]/g, "") })}
               placeholder="Ej. 24000"
             />
           </div>
@@ -110,8 +151,8 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Label htmlFor="product-cat">Categoría (opcional)</Label>
             <Input
               id="product-cat"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              value={form.category}
+              onChange={(e) => dispatch({ type: "set-category", value: e.target.value })}
               placeholder="Ej. Empanadas"
             />
           </div>
@@ -124,11 +165,11 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                   key={c.value}
                   type="button"
                   aria-label={c.label}
-                  onClick={() => setColor(c.value)}
+                  onClick={() => dispatch({ type: "set-color", value: c.value })}
                   className={cn(
                     "size-9 rounded-full border-2 transition-transform",
                     c.dot,
-                    color === c.value
+                    form.color === c.value
                       ? "scale-110 border-foreground"
                       : "border-transparent opacity-80",
                   )}

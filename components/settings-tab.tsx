@@ -5,12 +5,32 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { normalizeData, STORAGE_KEY } from "@/lib/app-data"
 import { useStore } from "@/lib/store"
-import { Download, Moon, Upload } from "lucide-react"
+import { Download, Moon, RotateCcw, Upload } from "lucide-react"
 import { toast } from "sonner"
 
+function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result))
+      const normalized = normalizeData(parsed)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
+      toast.success("Respaldo restaurado. Recargando...")
+      setTimeout(() => window.location.reload(), 800)
+    } catch {
+      toast.error("El archivo no es un respaldo válido")
+    }
+  }
+  reader.readAsText(file)
+  e.target.value = ""
+}
+
 export function SettingsTab() {
-  const { data, updateSettings, toggleTheme } = useStore()
+  const { data, updateSettings, toggleTheme, resetAppData } = useStore()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const handleExport = () => {
@@ -24,22 +44,15 @@ export function SettingsTab() {
     toast.success("Copia de seguridad descargada")
   }
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result))
-        localStorage.setItem("inventario-deditos-v1", JSON.stringify(parsed))
-        toast.success("Respaldo restaurado. Recargando...")
-        setTimeout(() => window.location.reload(), 800)
-      } catch {
-        toast.error("El archivo no es un respaldo válido")
-      }
-    }
-    reader.readAsText(file)
-    e.target.value = ""
+  const handleReset = () => {
+    const confirmed = window.confirm(
+      "Esto borrará todos los productos, ventas, clientes, movimientos y notas. ¿Deseas continuar?",
+    )
+    if (!confirmed) return
+
+    resetAppData()
+    toast.success("Se han reiniciado todos los datos")
+    window.setTimeout(() => window.location.reload(), 250)
   }
 
   return (
@@ -97,6 +110,17 @@ export function SettingsTab() {
             onCheckedChange={toggleTheme}
           />
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-destructive/20 bg-card p-4">
+        <h3 className="mb-1 text-sm font-semibold text-destructive">Reiniciar todo</h3>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Elimina todos los datos guardados en este dispositivo y deja la app como nueva.
+        </p>
+        <Button variant="destructive" className="h-11 rounded-xl" onClick={handleReset}>
+          <RotateCcw className="size-4" />
+          Reiniciar todo
+        </Button>
       </section>
 
       <section className="rounded-2xl border bg-card p-4">

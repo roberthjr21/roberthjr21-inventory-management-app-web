@@ -76,6 +76,7 @@ export function AppShell() {
         <div className="flex items-center gap-2 px-4 py-3">
           {isSub && (
             <button
+              type="button"
               onClick={() => setView("mas")}
               aria-label="Volver"
               className="-ml-1 flex size-9 items-center justify-center rounded-full text-foreground hover:bg-accent"
@@ -99,6 +100,7 @@ export function AppShell() {
             )}
           </div>
           <button
+            type="button"
             onClick={toggleTheme}
             aria-label="Cambiar modo claro/oscuro"
             className="flex size-9 items-center justify-center rounded-full text-foreground hover:bg-accent"
@@ -128,6 +130,7 @@ export function AppShell() {
             return (
               <button
                 key={item.view}
+                type="button"
                 onClick={() => setView(item.view)}
                 className={cn(
                   "flex flex-col items-center gap-1 py-2.5 text-xs transition-colors",

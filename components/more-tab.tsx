@@ -19,6 +19,7 @@ export function MoreTab({ onNavigate }: { onNavigate: (view: View) => void }) {
         {items.map((item, i) => (
           <button
             key={item.view}
+            type="button"
             onClick={() => onNavigate(item.view)}
             className={`flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-accent/40 ${
               i > 0 ? "border-t border-border" : ""
