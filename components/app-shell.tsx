@@ -22,6 +22,8 @@ import { MovementsTab } from "./movements-tab"
 import { CustomersTab } from "./customers-tab"
 import { SettingsTab } from "./settings-tab"
 import { Clock } from "./clock"
+import { Login } from "./login"
+import { Button } from "./ui/button"
 
 export type View =
   | "inicio"
@@ -55,13 +57,24 @@ const navItems: { view: View; label: string; icon: typeof Home }[] = [
 const subViews: View[] = ["movimientos", "clientes", "config"]
 
 export function AppShell() {
-  const { data, ready, toggleTheme } = useStore()
+  const { data, connection, pending, send, reload } = useStore()
   const [view, setView] = useState<View>("inicio")
 
   const isSub = subViews.includes(view)
   const activeNav: View = isSub ? "mas" : view
 
-  if (!ready) {
+  if (connection === "signedOut") return <Login />
+
+  if (connection === "unavailable") {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 px-4 text-center">
+        <p role="alert">El inventario no está disponible en este momento.</p>
+        <Button onClick={reload}>Volver a intentar</Button>
+      </main>
+    )
+  }
+
+  if (connection === "loading") {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background">
         <p className="text-sm text-muted-foreground">Cargando inventario...</p>
@@ -101,7 +114,8 @@ export function AppShell() {
           </div>
           <button
             type="button"
-            onClick={toggleTheme}
+            onClick={() => send({ type: "setTheme", theme: data.theme === "dark" ? "light" : "dark" })}
+            disabled={pending}
             aria-label="Cambiar modo claro/oscuro"
             className="flex size-9 items-center justify-center rounded-full text-foreground hover:bg-accent"
           >

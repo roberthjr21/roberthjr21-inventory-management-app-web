@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -17,34 +17,26 @@ import type { Customer } from "@/lib/types"
 import { MapPin, Phone, Trash2, UserPlus, Users } from "lucide-react"
 
 export function CustomersTab() {
-  const { data, addCustomer, updateCustomer, deleteCustomer } = useStore()
+  const { data, revision, pending, send } = useStore()
   const [open, setOpen] = useState(false)
+  const [editingRevision, setEditingRevision] = useState(0)
   const [editing, setEditing] = useState<Customer | null>(null)
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
   const [address, setAddress] = useState("")
   const [notes, setNotes] = useState("")
 
-  useEffect(() => {
-    if (open) {
-      setName(editing?.name ?? "")
-      setPhone(editing?.phone ?? "")
-      setAddress(editing?.address ?? "")
-      setNotes(editing?.notes ?? "")
-    }
-  }, [open, editing])
-
-  const openNew = () => {
-    setEditing(null)
+  const openForm = (customer: Customer | null) => {
+    setEditing(customer)
+    setEditingRevision(revision)
+    setName(customer?.name ?? "")
+    setPhone(customer?.phone ?? "")
+    setAddress(customer?.address ?? "")
+    setNotes(customer?.notes ?? "")
     setOpen(true)
   }
 
-  const openEdit = (c: Customer) => {
-    setEditing(c)
-    setOpen(true)
-  }
-
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmed = name.trim()
     if (!trimmed) return
     const payload = {
@@ -53,14 +45,15 @@ export function CustomersTab() {
       address: address.trim() || undefined,
       notes: notes.trim() || undefined,
     }
-    if (editing) updateCustomer(editing.id, payload)
-    else addCustomer(payload)
-    setOpen(false)
+    const saved = await send(editing
+      ? { type: "updateCustomer", id: editing.id, customer: payload }
+      : { type: "addCustomer", customer: payload })
+    if (saved) setOpen(false)
   }
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
-      <Button type="button" className="h-12 rounded-2xl text-base" onClick={openNew}>
+      <Button type="button" className="h-12 rounded-2xl text-base" onClick={() => openForm(null)}>
         <UserPlus className="size-5" />
         Nuevo cliente
       </Button>
@@ -81,7 +74,7 @@ export function CustomersTab() {
           <button
             key={c.id}
             type="button"
-            onClick={() => openEdit(c)}
+            onClick={() => openForm(c)}
             className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
           >
             <div className="flex items-start justify-between gap-2">
@@ -104,7 +97,7 @@ export function CustomersTab() {
         ))}
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open && (!editing || editingRevision === revision)} onOpenChange={setOpen}>
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Editar cliente" : "Nuevo cliente"}</DialogTitle>
@@ -113,12 +106,12 @@ export function CustomersTab() {
           <div className="flex flex-col gap-4 py-2">
             <div className="flex flex-col gap-2">
               <Label htmlFor="c-name">Nombre</Label>
-              <Input id="c-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+              <Input id="c-name" maxLength={160} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="c-phone">Teléfono</Label>
               <Input
-                id="c-phone"
+                id="c-phone" maxLength={80}
                 inputMode="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
@@ -126,12 +119,12 @@ export function CustomersTab() {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="c-address">Dirección</Label>
-              <Input id="c-address" value={address} onChange={(e) => setAddress(e.target.value)} />
+              <Input id="c-address" maxLength={500} value={address} onChange={(e) => setAddress(e.target.value)} />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="c-notes">Observaciones</Label>
               <Textarea
-                id="c-notes"
+                id="c-notes" maxLength={4000}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Ej. Siempre compra 5 bandejas los viernes"
@@ -145,9 +138,9 @@ export function CustomersTab() {
               <Button
                 variant="ghost"
                 className="text-destructive"
-                onClick={() => {
-                  deleteCustomer(editing.id)
-                  setOpen(false)
+                disabled={pending}
+                onClick={async () => {
+                  if (window.confirm(`¿Eliminar a «${editing.name}»?`) && await send({ type: "deleteCustomer", id: editing.id })) setOpen(false)
                 }}
               >
                 <Trash2 className="size-4" />
@@ -160,7 +153,7 @@ export function CustomersTab() {
               <Button variant="outline" onClick={() => setOpen(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleSave}>Guardar</Button>
+              <Button onClick={handleSave} disabled={pending || !name.trim()}>Guardar</Button>
             </div>
           </DialogFooter>
         </DialogContent>

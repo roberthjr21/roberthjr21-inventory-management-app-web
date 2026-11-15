@@ -8,14 +8,13 @@ import { cn } from "@/lib/utils"
 import { Check, NotebookPen, Plus, Trash2 } from "lucide-react"
 
 export function NotesTab() {
-  const { data, addNote, toggleNote, deleteNote } = useStore()
+  const { data, pending: saving, send } = useStore()
   const [text, setText] = useState("")
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     const trimmed = text.trim()
     if (!trimmed) return
-    addNote(trimmed)
-    setText("")
+    if (await send({ type: "addNote", text: trimmed })) setText("")
   }
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -32,12 +31,8 @@ export function NotesTab() {
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              handleAdd()
-            }
-          }}
+          maxLength={4000}
+          readOnly={saving}
           placeholder="Escribe una nota o recordatorio..."
           className="h-12 rounded-2xl text-base"
           aria-label="Nueva nota"
@@ -47,6 +42,7 @@ export function NotesTab() {
           size="icon"
           className="size-12 shrink-0 rounded-2xl"
           aria-label="Agregar nota"
+          disabled={saving || !text.trim()}
         >
           <Plus className="size-5" />
         </Button>
@@ -62,7 +58,7 @@ export function NotesTab() {
 
       <div className="flex flex-col gap-2">
         {pending.map((n) => (
-          <NoteRow key={n.id} text={n.text} done={false} onToggle={() => toggleNote(n.id)} onDelete={() => deleteNote(n.id)} />
+          <NoteRow key={n.id} text={n.text} done={false} disabled={saving} onToggle={() => send({ type: "toggleNote", id: n.id })} onDelete={() => send({ type: "deleteNote", id: n.id })} />
         ))}
       </div>
 
@@ -72,7 +68,7 @@ export function NotesTab() {
             Completadas
           </h3>
           {done.map((n) => (
-            <NoteRow key={n.id} text={n.text} done onToggle={() => toggleNote(n.id)} onDelete={() => deleteNote(n.id)} />
+            <NoteRow key={n.id} text={n.text} done disabled={saving} onToggle={() => send({ type: "toggleNote", id: n.id })} onDelete={() => send({ type: "deleteNote", id: n.id })} />
           ))}
         </div>
       )}
@@ -83,11 +79,13 @@ export function NotesTab() {
 function NoteRow({
   text,
   done,
+  disabled,
   onToggle,
   onDelete,
 }: {
   text: string
   done: boolean
+  disabled: boolean
   onToggle: () => void
   onDelete: () => void
 }) {
@@ -96,6 +94,7 @@ function NoteRow({
       <button
         type="button"
         onClick={onToggle}
+        disabled={disabled}
         aria-label={done ? "Marcar como pendiente" : "Marcar como hecho"}
         className={cn(
           "flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
@@ -117,6 +116,7 @@ function NoteRow({
         size="icon"
         className="size-8 shrink-0 text-muted-foreground"
         onClick={onDelete}
+        disabled={disabled}
         aria-label="Eliminar nota"
       >
         <Trash2 className="size-4" />

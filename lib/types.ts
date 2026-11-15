@@ -16,6 +16,7 @@ export interface Product {
   color: ProductColor
   category?: string
   order: number
+  archived?: boolean
 }
 
 export type MovementReason =
@@ -32,6 +33,7 @@ export interface Movement {
   delta: number
   reason: string
   note?: string
+  saleId?: string
   timestamp: number
 }
 
@@ -46,12 +48,15 @@ export interface SaleItem {
   productId: string
   productName: string
   quantity: number
+  unitPrice?: number
 }
 
 export interface Sale {
   id: string
   customerName: string
   items: SaleItem[]
+  currency?: string
+  voidedAt?: number
   timestamp: number
 }
 
