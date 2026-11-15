@@ -73,7 +73,7 @@ function formReducer(state: FormState, action: FormAction): FormState {
 }
 
 export function ProductFormDialog({ open, onOpenChange, product }: Props) {
-  const { addProduct, updateProduct, deleteProduct } = useStore()
+  const { pending, send } = useStore()
   const [form, dispatch] = useReducer(formReducer, initialFormState)
 
   const editing = Boolean(product)
@@ -84,23 +84,25 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
     }
   }, [open, product])
 
-  const handleSave = () => {
-    const trimmed = form.name.trim()
-    if (!trimmed) return
-    const qty = Math.max(0, Number.parseInt(form.quantity, 10) || 0)
-    const priceNum = Math.max(0, Number.parseInt(form.price, 10) || 0)
-    if (editing && product) {
-      updateProduct(product.id, { name: trimmed, quantity: qty, price: priceNum, color: form.color, category: form.category.trim() || undefined })
-    } else {
-      addProduct({ name: trimmed, quantity: qty, price: priceNum, color: form.color, category: form.category.trim() || undefined })
+  const handleSave = async () => {
+    const name = form.name.trim()
+    if (!name) return
+    const fields = {
+      name,
+      quantity: Number(form.quantity),
+      price: Number(form.price),
+      color: form.color,
+      category: form.category.trim() || undefined,
     }
-    onOpenChange(false)
+    const saved = await send(product
+      ? { type: "updateProduct", id: product.id, product: fields }
+      : { type: "addProduct", product: fields })
+    if (saved) onOpenChange(false)
   }
 
-  const handleDelete = () => {
-    if (product) {
-      deleteProduct(product.id)
-      onOpenChange(false)
+  const handleArchive = async () => {
+    if (product && window.confirm(`¿Archivar «${product.name}»? Se conservará su historial.`)) {
+      if (await send({ type: "archiveProduct", id: product.id, archived: true })) onOpenChange(false)
     }
   }
 
@@ -122,6 +124,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               value={form.name}
               onChange={(e) => dispatch({ type: "set-name", value: e.target.value })}
               placeholder="Ej. Bandejas de Deditos"
+              maxLength={160}
               autoFocus
             />
           </div>
@@ -130,6 +133,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Label htmlFor="product-qty">Cantidad inicial</Label>
             <Input
               id="product-qty"
+              maxLength={7}
               inputMode="numeric"
               value={form.quantity}
               onChange={(e) => dispatch({ type: "set-quantity", value: e.target.value.replace(/[^0-9]/g, "") })}
@@ -140,6 +144,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Label htmlFor="product-price">Precio</Label>
             <Input
               id="product-price"
+              maxLength={10}
               inputMode="numeric"
               value={form.price}
               onChange={(e) => dispatch({ type: "set-price", value: e.target.value.replace(/[^0-9]/g, "") })}
@@ -154,6 +159,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
               value={form.category}
               onChange={(e) => dispatch({ type: "set-category", value: e.target.value })}
               placeholder="Ej. Empanadas"
+              maxLength={160}
             />
           </div>
 
@@ -165,6 +171,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
                   key={c.value}
                   type="button"
                   aria-label={c.label}
+                  aria-pressed={form.color === c.value}
                   onClick={() => dispatch({ type: "set-color", value: c.value })}
                   className={cn(
                     "size-9 rounded-full border-2 transition-transform",
@@ -181,9 +188,9 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
 
         <DialogFooter className="flex-row justify-between gap-2 sm:justify-between">
           {editing ? (
-            <Button variant="ghost" className="text-destructive" onClick={handleDelete}>
+            <Button variant="ghost" className="text-destructive" onClick={handleArchive} disabled={pending}>
               <Trash2 className="size-4" />
-              Eliminar
+              Archivar
             </Button>
           ) : (
             <span />
@@ -192,7 +199,7 @@ export function ProductFormDialog({ open, onOpenChange, product }: Props) {
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSave}>Guardar</Button>
+            <Button onClick={handleSave} disabled={pending || !form.name.trim()}>Guardar</Button>
           </div>
         </DialogFooter>
       </DialogContent>

@@ -38,7 +38,7 @@ export function MoreTab({ onNavigate }: { onNavigate: (view: View) => void }) {
       </div>
 
       <p className="text-center text-xs text-muted-foreground">
-        {data.products.length} productos · {data.sales.length} ventas ·{" "}
+        {data.products.filter(product => !product.archived).length} productos · {data.sales.filter(sale => sale.voidedAt === undefined).length} ventas ·{" "}
         {data.customers.length} clientes
       </p>
     </div>

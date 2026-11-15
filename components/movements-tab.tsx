@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { History, Trash2 } from "lucide-react"
 
 export function MovementsTab() {
-  const { data, clearMovements } = useStore()
+  const { data, pending, send } = useStore()
 
   const groups = useMemo(() => {
     const map = new Map<string, { label: string; ts: number; items: Movement[] }>()
@@ -34,8 +34,11 @@ export function MovementsTab() {
             variant="ghost"
             size="sm"
             className="text-destructive"
+            disabled={pending}
             onClick={() => {
-              if (confirm("¿Borrar todo el historial de movimientos?")) clearMovements()
+              if (confirm("¿Borrar todo el historial de movimientos? Se guardará una copia anterior.")) {
+                void send({ type: "clearMovements" })
+              }
             }}
           >
             <Trash2 className="size-4" />

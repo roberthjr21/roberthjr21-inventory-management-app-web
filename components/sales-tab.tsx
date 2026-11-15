@@ -12,27 +12,26 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useStore } from "@/lib/store"
-import { formatDate, formatTime } from "@/lib/format"
-import type { SaleItem } from "@/lib/types"
+import { formatAmount, formatDate, formatTime, saleTotal } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Minus, Plus, Receipt, ShoppingCart, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 export function SalesTab() {
-  const { data, addSale, deleteSale } = useStore()
+  const { data, pending, send } = useStore()
   const currency = data.settings.currency
   const [open, setOpen] = useState(false)
   const [customerName, setCustomerName] = useState("")
   const [cart, setCart] = useState<Record<string, number>>({})
 
   const sortedProducts = useMemo(
-    () => [...data.products].sort((a, b) => a.order - b.order),
+    () => data.products.filter(p => !p.archived).sort((a, b) => a.order - b.order),
     [data.products],
   )
 
   const totalItems = Object.values(cart).reduce((a, b) => a + b, 0)
 
-  const productMap = useMemo(() => new Map(data.products.map((product) => [product.id, product])), [data.products])
+  const productMap = useMemo(() => new Map(sortedProducts.map((product) => [product.id, product])), [sortedProducts])
 
   const cartTotal = useMemo(() => {
     return Object.entries(cart).reduce((sum, [productId, quantity]) => {
@@ -55,35 +54,37 @@ export function SalesTab() {
     setCart({})
   }
 
-  const handleSave = () => {
-    const items: SaleItem[] = Object.entries(cart).reduce<SaleItem[]>((acc, [productId, quantity]) => {
-      if (quantity <= 0) return acc
-      const p = productMap.get(productId)
-      acc.push({ productId, productName: p?.name ?? "", quantity })
-      return acc
-    }, [])
-    if (items.length === 0) {
-      toast.error("Agrega al menos un producto a la venta")
-      return
-    }
-    const overstock = items.find((item) => {
-      const p = productMap.get(item.productId)
-      return !p || item.quantity > p.quantity
-    })
+  const handleSave = async () => {
+    const items = Object.entries(cart).map(([productId, quantity]) => ({ productId, quantity }))
+    const overstock = items.find(item => item.quantity > (productMap.get(item.productId)?.quantity ?? 0))
     if (overstock) {
-      toast.error(`No hay suficiente stock de "${overstock.productName}"`)
+      toast.error("Revisa el carrito. Uno de los productos ya no tiene suficiente stock.")
       return
     }
-    addSale(customerName.trim(), items)
-    toast.success("Venta registrada e inventario actualizado")
-    resetForm()
-    setOpen(false)
+    if (await send({ type: "addSale", customerName, items })) {
+      toast.success("Venta registrada e inventario actualizado")
+      resetForm()
+      setOpen(false)
+    }
+  }
+
+  const activeSales = data.sales.filter(sale => sale.voidedAt === undefined)
+  const totals = new Map<string, number>()
+  let incompleteTotals = false
+  for (const sale of activeSales) {
+    const total = saleTotal(sale)
+    if (total === undefined || sale.currency === undefined) {
+      incompleteTotals = true
+    } else {
+      totals.set(sale.currency, (totals.get(sale.currency) ?? 0) + total)
+    }
   }
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
       <Button
         className="h-12 rounded-2xl text-base"
+        disabled={pending}
         onClick={() => {
           resetForm()
           setOpen(true)
@@ -103,77 +104,80 @@ export function SalesTab() {
       )}
 
       <div className="flex flex-col gap-3">
-        {data.sales.map((sale) => (
-          <div key={sale.id} className="rounded-2xl border bg-card p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="font-semibold leading-tight">
-                  {sale.customerName || "Cliente sin nombre"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {formatDate(sale.timestamp)} · {formatTime(sale.timestamp)}
-                </p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8 shrink-0 text-muted-foreground"
-                onClick={() => deleteSale(sale.id)}
-                aria-label="Eliminar venta"
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
-            <ul className="mt-2 flex flex-col gap-1">
-              {sale.items.map((item) => {
-                const p = data.products.find((x) => x.id === item.productId)
-                const itemTotal = (p?.price ?? 0) * item.quantity
-                return (
-                  <li key={item.productId} className="flex justify-between text-sm">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-muted-foreground">{item.productName}</span>
-                      <span className="text-muted-foreground"> x{item.quantity}</span>
-                    </div>
-                    <span className="font-medium tabular-nums text-foreground">
-                      {currency}{itemTotal.toLocaleString()}
-                    </span>
-                  </li>
-                )
-              })}
-            </ul>
-            {sale.items.length > 0 && (
-              <div className="mt-3 border-t pt-2">
-                <div className="flex justify-between text-sm font-semibold">
-                  <span>Total:</span>
-                  <span className="tabular-nums">
-                    {currency}{sale.items
-                      .reduce((sum, item) => {
-                        const p = data.products.find((x) => x.id === item.productId)
-                        return sum + (p?.price ?? 0) * item.quantity
-                      }, 0)
-                      .toLocaleString()}
-                  </span>
+        {data.sales.map(sale => {
+          const total = saleTotal(sale)
+          const voided = sale.voidedAt !== undefined
+          return (
+            <div key={sale.id} className="rounded-2xl border bg-card p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold leading-tight">
+                    {sale.customerName || "Cliente sin nombre"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(sale.timestamp)} · {formatTime(sale.timestamp)}
+                  </p>
                 </div>
+                {voided ? <span className="text-xs text-muted-foreground">Anulada</span> : <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 text-muted-foreground"
+                  disabled={pending}
+                  onClick={async () => {
+                    const missing = sale.items.filter(item => !data.products.some(product => product.id === item.productId))
+                    const message = missing.length
+                      ? `¿Anular esta venta? Estos productos ya no están en el catálogo y no recibirán devoluciones: ${missing.map(item => item.productName).join(", ")}.`
+                      : "¿Anular esta venta y devolver sus unidades al inventario?"
+                    if (window.confirm(message)) {
+                      if (await send({ type: "voidSale", id: sale.id })) toast.success("Venta anulada")
+                    }
+                  }}
+                  aria-label="Anular venta"
+                >
+                  <Trash2 className="size-4" />
+                </Button>}
               </div>
-            )}
-          </div>
-        ))}
+              <ul className="mt-2 flex flex-col gap-1">
+                {sale.items.map((item) => {
+                  const itemTotal = item.unitPrice === undefined ? undefined : item.unitPrice * item.quantity
+                  return (
+                    <li key={item.productId} className="flex justify-between text-sm">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-muted-foreground">{item.productName}</span>
+                        <span className="text-muted-foreground"> x{item.quantity}</span>
+                      </div>
+                      <span className="font-medium tabular-nums text-foreground">
+                        {itemTotal === undefined ? "Sin precio histórico" : formatAmount(itemTotal, sale.currency ?? "")}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+              {sale.items.length > 0 && (
+                <div className="mt-3 border-t pt-2">
+                  <div className="flex justify-between text-sm font-semibold">
+                    <span>Total:</span>
+                    <span className="tabular-nums">
+                      {total === undefined ? "Sin importe histórico" : formatAmount(total, sale.currency ?? "")}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      {data.sales.length > 0 && (
-        <div className="mt-4 flex items-center justify-between border-t-2 border-border bg-card px-4 py-4 rounded-2xl">
-          <span className="text-base font-bold">Total general:</span>
-          <span className="text-2xl font-bold tabular-nums text-primary">
-            {currency}{data.sales
-              .reduce((sum, sale) => {
-                return sum + sale.items.reduce((saleSum, item) => {
-                  const p = data.products.find((x) => x.id === item.productId)
-                  return saleSum + (p?.price ?? 0) * item.quantity
-                }, 0)
-              }, 0)
-              .toLocaleString()}
-          </span>
-        </div>
+      {activeSales.length > 0 && (
+        <section className="rounded-2xl border bg-card px-4 py-4">
+          <h2 className="font-bold">Total de ventas vigentes</h2>
+          {Array.from(totals, ([symbol, amount]) => (
+            <p key={symbol} className="text-xl font-bold tabular-nums text-primary">{formatAmount(amount, symbol)}</p>
+          ))}
+          {incompleteTotals && (
+            <p className="text-sm text-muted-foreground">Hay ventas anteriores sin importe o moneda registrados.</p>
+          )}
+        </section>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -189,6 +193,7 @@ export function SalesTab() {
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="Ej. María"
+              maxLength={160}
               list="customers-list"
             />
             <datalist id="customers-list">
@@ -202,7 +207,7 @@ export function SalesTab() {
             <Label className="mb-2 block">Productos</Label>
             <div className="flex flex-col gap-2">
               {sortedProducts.map((p) => {
-                const qty = cart[p.id] ?? 0
+                const qty = Object.hasOwn(cart, p.id) ? cart[p.id] : 0
                 return (
                   <div
                     key={p.id}
@@ -214,7 +219,7 @@ export function SalesTab() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium leading-tight">{p.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {currency}{(p.price || 0).toLocaleString()} · Disponible: {p.quantity}
+                        {formatAmount(p.price, currency)} · Disponible: {p.quantity}
                       </p>
                     </div>
                     <Button
@@ -224,7 +229,7 @@ export function SalesTab() {
                       className="size-8 shrink-0 rounded-lg"
                       onClick={() => setQty(p.id, qty - 1)}
                       disabled={qty === 0}
-                      aria-label="Restar"
+                      aria-label={`Restar ${p.name}`}
                     >
                       <Minus className="size-4" />
                     </Button>
@@ -236,7 +241,7 @@ export function SalesTab() {
                       className="size-8 shrink-0 rounded-lg"
                       onClick={() => setQty(p.id, qty + 1)}
                       disabled={qty >= p.quantity}
-                      aria-label="Sumar"
+                      aria-label={`Sumar ${p.name}`}
                     >
                       <Plus className="size-4" />
                     </Button>
@@ -251,7 +256,7 @@ export function SalesTab() {
               <div>
                 <p className="text-xs text-muted-foreground">Total de la venta</p>
                 <p className="text-2xl font-bold tabular-nums">
-                  {currency}{cartTotal.toLocaleString()}
+                  {formatAmount(cartTotal, currency)}
                 </p>
               </div>
               <div className="text-right">
@@ -264,7 +269,7 @@ export function SalesTab() {
             <Button variant="outline" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button type="button" onClick={handleSave}>
+            <Button type="button" onClick={handleSave} disabled={pending || totalItems === 0}>
               Registrar{totalItems > 0 ? ` (${totalItems})` : ""}
             </Button>
           </DialogFooter>

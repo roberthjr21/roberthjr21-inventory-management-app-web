@@ -1,6 +1,5 @@
 "use client"
 
-import { useMemo } from "react"
 import { useStore } from "@/lib/store"
 import { isThisWeek } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -9,42 +8,32 @@ import { ArrowDownRight, ArrowUpRight, BarChart3, CalendarDays, Sun } from "luci
 export function StatsTab() {
   const { data } = useStore()
 
-  const lowStockThreshold = data.settings?.lowStockThreshold ?? 0
+  const lowStockThreshold = data.settings.lowStockThreshold
+  const products = data.products.filter(product => !product.archived).sort((a, b) => a.order - b.order)
+  const lowStock = products.filter(product => product.quantity <= lowStockThreshold)
+  const names = new Map(data.products.map(product => [product.id, product.name]))
+  const byProduct = new Map<string, { id: string; name: string; quantity: number }>()
+  let totalSales = 0
+  let weekTotal = 0
 
-  const stats = useMemo(() => {
-    const sales = data.movements.filter((m) => m.reason === "Venta" && m.delta < 0)
-
-    const all = new Map<string, number>()
-    let totalSales = 0
-    let weekTotal = 0
-
-    for (const m of sales) {
-      const qty = Math.abs(m.delta)
-      totalSales += qty
-      all.set(m.productName, (all.get(m.productName) ?? 0) + qty)
-      if (isThisWeek(m.timestamp)) {
-        weekTotal += qty
-      }
+  for (const sale of data.sales) {
+    if (sale.voidedAt !== undefined) continue
+    const thisWeek = isThisWeek(sale.timestamp)
+    for (const item of sale.items) {
+      totalSales += item.quantity
+      if (thisWeek) weekTotal += item.quantity
+      const current = byProduct.get(item.productId)
+      byProduct.set(item.productId, {
+        id: item.productId,
+        name: names.get(item.productId) ?? current?.name ?? item.productName,
+        quantity: (current?.quantity ?? 0) + item.quantity,
+      })
     }
+  }
 
-    const allArr = Array.from(all.entries()).sort((a, b) => b[1] - a[1])
-    const maxQty = allArr[0]?.[1] || 1
-
-    return {
-      allList: allArr,
-      totalSales,
-      weekTotal,
-      best: allArr[0],
-      worst: allArr.length > 1 ? allArr[allArr.length - 1] : undefined,
-      hasData: allArr.length > 0,
-      maxQty,
-    }
-  }, [data.movements])
-
-  const lowStock = useMemo(
-    () => data.products.filter((p) => p.quantity <= lowStockThreshold),
-    [data.products, lowStockThreshold],
-  )
+  const allList = Array.from(byProduct.values()).sort((a, b) => b.quantity - a.quantity)
+  const best = allList[0]
+  const worst = allList.length > 1 ? allList[allList.length - 1] : undefined
 
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
@@ -54,7 +43,7 @@ export function StatsTab() {
             <Sun className="size-4" />
             <span className="text-xs font-medium">Ventas totales</span>
           </div>
-          <p className="mt-2 text-3xl font-bold tabular-nums">{stats.totalSales}</p>
+          <p className="mt-2 text-3xl font-bold tabular-nums">{totalSales}</p>
           <p className="text-xs text-muted-foreground">unidades vendidas</p>
         </div>
         <div className="rounded-2xl border bg-card p-4">
@@ -62,7 +51,7 @@ export function StatsTab() {
             <CalendarDays className="size-4" />
             <span className="text-xs font-medium">Esta semana</span>
           </div>
-          <p className="mt-2 text-3xl font-bold tabular-nums">{stats.weekTotal}</p>
+          <p className="mt-2 text-3xl font-bold tabular-nums">{weekTotal}</p>
           <p className="text-xs text-muted-foreground">unidades vendidas</p>
         </div>
       </div>
@@ -74,19 +63,19 @@ export function StatsTab() {
             <span>Ventas totales por producto</span>
           </div>
           <span className="text-xs text-muted-foreground">
-            {stats.allList.length} producto(s) vendidos
+            {allList.length} producto(s) vendidos
           </span>
         </div>
 
-        {stats.allList.length === 0 ? (
+        {allList.length === 0 ? (
           <p className="text-sm text-muted-foreground">No hay ventas registradas.</p>
         ) : (
           <div className="flex flex-col gap-3">
-            {stats.allList.map(([name, qty], index) => (
-              <div key={name} className="space-y-2">
+            {allList.map(({ id, name, quantity }, index) => (
+              <div key={id} className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="truncate pr-2">{name}</span>
-                  <span className="font-semibold tabular-nums">{qty}</span>
+                  <span className="font-semibold tabular-nums">{quantity}</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
@@ -97,7 +86,7 @@ export function StatsTab() {
                         ? "bg-emerald-500"
                         : "bg-slate-400"
                     }`}
-                    style={{ width: `${(qty / stats.maxQty) * 100}%` }}
+                    style={{ width: `${(quantity / best.quantity) * 100}%` }}
                   />
                 </div>
               </div>
@@ -106,26 +95,26 @@ export function StatsTab() {
         )}
       </section>
 
-      {stats.hasData && (
+      {best && (
         <div className="grid grid-cols-1 gap-3">
           <div className="flex items-center gap-3 rounded-2xl border border-green-500/30 bg-green-500/10 p-4">
             <ArrowUpRight className="size-6 shrink-0 text-green-600 dark:text-green-400" />
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">Más vendido</p>
               <p className="truncate font-semibold">
-                {stats.best?.[0]}{" "}
-                <span className="text-muted-foreground">({stats.best?.[1]})</span>
+                {best.name}{" "}
+                <span className="text-muted-foreground">({best.quantity})</span>
               </p>
             </div>
           </div>
-          {stats.worst && (
+          {worst && (
             <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-4">
               <ArrowDownRight className="size-6 shrink-0 text-muted-foreground" />
               <div className="min-w-0">
                 <p className="text-xs font-medium text-muted-foreground">Menos vendido</p>
                 <p className="truncate font-semibold">
-                  {stats.worst[0]}{" "}
-                  <span className="text-muted-foreground">({stats.worst[1]})</span>
+                  {worst.name}{" "}
+                  <span className="text-muted-foreground">({worst.quantity})</span>
                 </p>
               </div>
             </div>
@@ -136,9 +125,7 @@ export function StatsTab() {
       <section className="rounded-2xl border bg-card p-4">
         <h3 className="mb-3 text-sm font-semibold">Inventario actual</h3>
         <div className="flex flex-col gap-2">
-          {[...data.products]
-            .sort((a, b) => a.order - b.order)
-            .map((p) => {
+          {products.map((p) => {
               const isLow = p.quantity <= lowStockThreshold
               return (
                 <div key={p.id} className="flex items-center justify-between text-sm">

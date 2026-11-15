@@ -18,17 +18,50 @@ import {
 } from "lucide-react"
 import { ProductFormDialog } from "./product-form-dialog"
 
+function StockQuantity({ product }: { product: Product }) {
+  const { pending, send } = useStore()
+  const [draft, setDraft] = useState(String(product.quantity))
+  const quantity = Number(draft)
+  const dirty = draft !== String(product.quantity)
+  const valid = /^\d+$/.test(draft) && quantity <= 1_000_000
+
+  return (
+    <form className="flex min-w-0 flex-1 flex-col items-center gap-1" onSubmit={event => {
+      event.preventDefault()
+      if (valid && dirty) void send({ type: "setQuantity", id: product.id, quantity })
+    }}>
+      <input
+        name="quantity"
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        maxLength={7}
+        readOnly={pending}
+        onChange={event => setDraft(event.target.value.replace(/[^0-9]/g, ""))}
+        className="w-full min-w-0 rounded-lg bg-transparent text-center text-4xl font-bold tabular-nums outline-none focus-visible:ring-2"
+        aria-label={`Cantidad de ${product.name}`}
+      />
+      {dirty && (
+        <Button type="submit" size="sm" variant="outline" disabled={pending || !valid}
+          aria-label={`Guardar cantidad de ${product.name}`}>
+          Guardar
+        </Button>
+      )}
+    </form>
+  )
+}
+
 export function InventoryTab() {
-  const { data, adjustQuantity, setQuantity, reorderProduct } = useStore()
+  const { data, revision, pending, send } = useStore()
   const [query, setQuery] = useState("")
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editing, setEditing] = useState<Product | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [reorderMode, setReorderMode] = useState(false)
 
   const threshold = data.settings.lowStockThreshold
 
   const sorted = useMemo(
-    () => [...data.products].sort((a, b) => a.order - b.order),
+    () => data.products.filter(p => !p.archived).sort((a, b) => a.order - b.order),
     [data.products],
   )
 
@@ -42,15 +75,17 @@ export function InventoryTab() {
     )
   }, [sorted, query])
 
+  const editing = sorted.find(product => product.id === editingId)
+  const archived = data.products.filter(p => p.archived)
   const lowStock = sorted.filter((p) => p.quantity <= threshold)
 
   const openNew = () => {
-    setEditing(null)
+    setEditingId(null)
     setDialogOpen(true)
   }
 
   const openEdit = (p: Product) => {
-    setEditing(p)
+    setEditingId(p.id)
     setDialogOpen(true)
   }
 
@@ -130,8 +165,8 @@ export function InventoryTab() {
                       variant="ghost"
                       size="icon"
                       className="size-7"
-                      disabled={idx === 0}
-                      onClick={() => reorderProduct(p.id, "up")}
+                      disabled={pending || Boolean(query.trim()) || idx === 0}
+                      onClick={() => send({ type: "reorderProduct", id: p.id, direction: "up" })}
                       aria-label="Subir"
                     >
                       <ChevronUp className="size-4" />
@@ -140,8 +175,8 @@ export function InventoryTab() {
                       variant="ghost"
                       size="icon"
                       className="size-7"
-                      disabled={idx === filtered.length - 1}
-                      onClick={() => reorderProduct(p.id, "down")}
+                      disabled={pending || Boolean(query.trim()) || idx === filtered.length - 1}
+                      onClick={() => send({ type: "reorderProduct", id: p.id, direction: "down" })}
                       aria-label="Bajar"
                     >
                       <ChevronDown className="size-4" />
@@ -165,32 +200,22 @@ export function InventoryTab() {
                   variant="outline"
                   size="icon"
                   className="size-12 shrink-0 rounded-2xl"
-                  onClick={() => adjustQuantity(p.id, -1, "Venta")}
-                  disabled={p.quantity === 0}
+                  onClick={() => send({ type: "adjustQuantity", id: p.id, delta: -1 })}
+                  disabled={pending || p.quantity === 0}
                   aria-label={`Descontar ${p.name}`}
                 >
                   <Minus className="size-6" />
                 </Button>
 
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={p.quantity}
-                  onChange={(e) => {
-                    const val = Number.parseInt(e.target.value.replace(/[^0-9]/g, ""), 10)
-                    setQuantity(p.id, Number.isNaN(val) ? 0 : val)
-                  }}
-                  className={cn(
-                    "w-full min-w-0 bg-transparent text-center text-4xl font-bold tabular-nums outline-none",
-                    isLow ? "text-destructive" : "text-foreground",
-                  )}
-                  aria-label={`Cantidad de ${p.name}`}
-                />
+                <div className={cn("min-w-0 flex-1", isLow && "text-destructive")}>
+                  <StockQuantity key={`${p.quantity}-${revision}`} product={p} />
+                </div>
 
                 <Button
                   size="icon"
                   className="size-12 shrink-0 rounded-2xl"
-                  onClick={() => adjustQuantity(p.id, 1, "Producción")}
+                  onClick={() => send({ type: "adjustQuantity", id: p.id, delta: 1 })}
+                  disabled={pending || p.quantity >= 1_000_000}
                   aria-label={`Agregar ${p.name}`}
                 >
                   <Plus className="size-6" />
@@ -217,7 +242,24 @@ export function InventoryTab() {
         Nuevo Producto
       </Button>
 
-      <ProductFormDialog open={dialogOpen} onOpenChange={setDialogOpen} product={editing} />
+      {archived.length > 0 && (
+        <details className="rounded-2xl border bg-card p-4">
+          <summary className="cursor-pointer text-sm font-medium">Productos archivados ({archived.length})</summary>
+          <ul className="mt-3 space-y-2">
+            {archived.map(product => (
+              <li key={product.id} className="flex items-center justify-between gap-3 text-sm">
+                <span>{product.name} · {product.quantity} unidades</span>
+                <Button size="sm" variant="outline" disabled={pending}
+                  onClick={() => send({ type: "archiveProduct", id: product.id, archived: false })}>
+                  Reactivar
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <ProductFormDialog open={dialogOpen && (!editingId || Boolean(editing))} onOpenChange={setDialogOpen} product={editing} />
     </div>
   )
 }

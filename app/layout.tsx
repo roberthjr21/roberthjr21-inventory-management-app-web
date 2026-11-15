@@ -1,4 +1,3 @@
-import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
@@ -12,7 +11,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'Inventario · Deditos y Empanadas',
   description: 'Controla tu inventario de bandejas, ventas y clientes en segundos.',
-  generator: 'v0.app',
+  robots: { index: false, follow: false },
   icons: {
     icon: '/icon.svg',
   },
@@ -22,8 +21,6 @@ export const viewport: Viewport = {
   colorScheme: 'light dark',
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#fdfaf5' },
     { media: '(prefers-color-scheme: dark)', color: '#2b2620' },
@@ -39,7 +36,6 @@ export default function RootLayout({
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} bg-background`}>
       <body className="bg-background font-sans antialiased">
         {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
   )

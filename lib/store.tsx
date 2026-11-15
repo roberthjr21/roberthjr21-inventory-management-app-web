@@ -1,323 +1,137 @@
 "use client"
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react"
-import type {
-  AppData,
-  Customer,
-  Movement,
-  Product,
-  ProductColor,
-  Sale,
-  SaleItem,
-  Settings,
-} from "./types"
-import { createDefaultData, normalizeData, STORAGE_KEY, uid } from "./app-data"
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
+import { toast } from "sonner"
+import { createDefaultData } from "./app-data"
+import type { InventoryCommand, InventorySnapshot } from "./inventory-schema"
 
-const defaultData: AppData = createDefaultData()
+type Connection = "loading" | "signedOut" | "ready" | "unavailable"
 
-interface StoreContextValue {
-  data: AppData
-  ready: boolean
-  // products
-  addProduct: (p: { name: string; quantity: number; price: number; color: ProductColor; category?: string }) => void
-  updateProduct: (id: string, patch: Partial<Product>) => void
-  deleteProduct: (id: string) => void
-  reorderProduct: (id: string, direction: "up" | "down") => void
-  adjustQuantity: (id: string, delta: number, reason: string, note?: string) => void
-  setQuantity: (id: string, value: number, reason?: string) => void
-  // notes
-  addNote: (text: string) => void
-  toggleNote: (id: string) => void
-  updateNote: (id: string, text: string) => void
-  deleteNote: (id: string) => void
-  // sales
-  addSale: (customerName: string, items: SaleItem[]) => void
-  deleteSale: (id: string) => void
-  // customers
-  addCustomer: (c: Omit<Customer, "id">) => void
-  updateCustomer: (id: string, patch: Partial<Customer>) => void
-  deleteCustomer: (id: string) => void
-  // settings & theme
-  updateSettings: (patch: Partial<Settings>) => void
-  toggleTheme: () => void
-  resetAppData: () => void
-  // movements
-  clearMovements: () => void
+interface StoreContextValue extends InventorySnapshot {
+  connection: Connection
+  pending: boolean
+  send: (command: InventoryCommand) => Promise<boolean>
+  signIn: (password: string) => Promise<string | null>
+  signOut: () => Promise<void>
+  reload: () => Promise<void>
 }
 
+const initial: InventorySnapshot = { data: createDefaultData(), revision: 0, hasCheckpoint: false }
 const StoreContext = createContext<StoreContextValue | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<AppData>(defaultData)
-  const [ready, setReady] = useState(false)
-  const firstLoad = useRef(true)
+  const [snapshot, setSnapshot] = useState(initial)
+  const [connection, setConnection] = useState<Connection>("loading")
+  const [pending, setPending] = useState(false)
+  const busy = useRef(false)
 
-  const restoreDefaults = () => {
-    const fresh = createDefaultData()
-    setData(fresh)
-    try {
-      localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // ignore storage errors
-    }
-    return fresh
+  const forgetSession = () => {
+    setSnapshot(initial)
+    setConnection("signedOut")
   }
 
-  // load
-  useEffect(() => {
+  const reload = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<AppData>
-        setData(normalizeData(parsed))
+      const response = await fetch("/api/inventory", { cache: "no-store" })
+      if (response.status === 401) {
+        forgetSession()
+      } else if (response.ok) {
+        setSnapshot(await response.json())
+        setConnection("ready")
+      } else {
+        setConnection("unavailable")
       }
     } catch {
-      // ignore corrupt data
+      setConnection("unavailable")
     }
-    setReady(true)
   }, [])
 
-  // persist
   useEffect(() => {
-    if (firstLoad.current) {
-      firstLoad.current = false
-      return
-    }
-    if (!ready) return
+    const timer = window.setTimeout(() => { void reload() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [reload])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", snapshot.data.theme === "dark")
+  }, [snapshot.data.theme])
+
+  const send = async (command: InventoryCommand) => {
+    if (busy.current) return false
+    busy.current = true
+    setPending(true)
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+      const response = await fetch("/api/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: snapshot.revision, command }),
+      })
+      if (response.status === 401) {
+        forgetSession()
+        toast.error("Tu sesión terminó. Inicia sesión de nuevo.")
+        return false
+      }
+      const result = await response.json()
+      if (response.ok || response.status === 409) {
+        const { data, revision, hasCheckpoint } = result as InventorySnapshot
+        setSnapshot({ data, revision, hasCheckpoint })
+      }
+      if (!response.ok) {
+        toast.error(result.error ?? "No fue posible guardar los cambios.")
+        return false
+      }
+      return true
     } catch {
-      // ignore quota errors
+      toast.error("No se pudo confirmar el guardado. Revisa la conexión y actualiza el inventario.")
+      return false
+    } finally {
+      busy.current = false
+      setPending(false)
     }
-  }, [data, ready])
+  }
 
-  // apply theme class
-  useEffect(() => {
-    const root = document.documentElement
-    if (data.theme === "dark") {
-      root.classList.add("dark")
-      root.classList.remove("light")
-    } else {
-      root.classList.add("light")
-      root.classList.remove("dark")
+  const signIn = async (password: string) => {
+    try {
+      const response = await fetch("/api/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      })
+      if (!response.ok) {
+        const result = await response.json()
+        return result.error ?? "No fue posible iniciar sesión."
+      }
+      await reload()
+      return null
+    } catch {
+      return "No fue posible conectar con el servidor."
     }
-  }, [data.theme])
+  }
 
-  const value = useMemo<StoreContextValue>(() => {
-    const recordMovement = (m: Omit<Movement, "id" | "timestamp">) => {
-      const movement: Movement = { ...m, id: uid(), timestamp: Date.now() }
-      setData((d) => ({ ...d, movements: [movement, ...d.movements].slice(0, 500) }))
+  const signOut = async () => {
+    if (busy.current) return
+    busy.current = true
+    setPending(true)
+    try {
+      const response = await fetch("/api/session", { method: "DELETE" })
+      if (!response.ok) throw new Error()
+      forgetSession()
+    } catch {
+      toast.error("No se pudo cerrar la sesión. Inténtalo de nuevo.")
+    } finally {
+      busy.current = false
+      setPending(false)
     }
+  }
 
-    return {
-      data,
-      ready,
-      addProduct: ({ name, quantity, price, color, category }) =>
-        setData((d) => ({
-          ...d,
-          products: [
-            ...d.products,
-            { id: uid(), name, quantity, price, color, category, order: d.products.length },
-          ],
-        })),
-      updateProduct: (id, patch) =>
-        setData((d) => {
-          const product = d.products.find((p) => p.id === id)
-          if (!product) return d
-
-          const nextQuantity = patch.quantity ?? product.quantity
-          const delta = nextQuantity - product.quantity
-          const productName = patch.name ?? product.name
-          const movements =
-            delta !== 0
-              ? [
-                  {
-                    id: uid(),
-                    productId: id,
-                    productName,
-                    delta,
-                    reason: "Ajuste",
-                    note: "Edición de producto",
-                    timestamp: Date.now(),
-                  } as Movement,
-                  ...d.movements,
-                ].slice(0, 500)
-              : d.movements
-
-          return {
-            ...d,
-            products: d.products.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-            movements,
-          }
-        }),
-      deleteProduct: (id) =>
-        setData((d) => ({ ...d, products: d.products.filter((p) => p.id !== id) })),
-      reorderProduct: (id, direction) =>
-        setData((d) => {
-          const sorted = [...d.products].sort((a, b) => a.order - b.order)
-          const idx = sorted.findIndex((p) => p.id === id)
-          if (idx === -1) return d
-          const swapWith = direction === "up" ? idx - 1 : idx + 1
-          if (swapWith < 0 || swapWith >= sorted.length) return d
-          const a = sorted[idx]
-          const b = sorted[swapWith]
-          return {
-            ...d,
-            products: d.products.map((p) => {
-              if (p.id === a.id) return { ...p, order: b.order }
-              if (p.id === b.id) return { ...p, order: a.order }
-              return p
-            }),
-          }
-        }),
-      adjustQuantity: (id, delta, reason, note) => {
-        const product = data.products.find((p) => p.id === id)
-        if (!product) return
-        setData((d) => ({
-          ...d,
-          products: d.products.map((p) =>
-            p.id === id ? { ...p, quantity: Math.max(0, p.quantity + delta) } : p,
-          ),
-        }))
-        recordMovement({ productId: id, productName: product.name, delta, reason, note })
-      },
-      setQuantity: (id, value, reason = "Ajuste") => {
-        const product = data.products.find((p) => p.id === id)
-        if (!product) return
-        const newVal = Math.max(0, value)
-        const delta = newVal - product.quantity
-        setData((d) => {
-          const movements =
-            delta !== 0
-              ? [
-                  {
-                    id: uid(),
-                    productId: id,
-                    productName: product.name,
-                    delta,
-                    reason,
-                    timestamp: Date.now(),
-                  } as Movement,
-                  ...d.movements,
-                ].slice(0, 500)
-              : d.movements
-          return {
-            ...d,
-            products: d.products.map((p) => (p.id === id ? { ...p, quantity: newVal } : p)),
-            movements,
-          }
-        })
-      },
-      addNote: (text) =>
-        setData((d) => ({
-          ...d,
-          notes: [{ id: uid(), text, done: false, timestamp: Date.now() }, ...d.notes],
-        })),
-      toggleNote: (id) =>
-        setData((d) => ({
-          ...d,
-          notes: d.notes.map((n) => (n.id === id ? { ...n, done: !n.done } : n)),
-        })),
-      updateNote: (id, text) =>
-        setData((d) => ({
-          ...d,
-          notes: d.notes.map((n) => (n.id === id ? { ...n, text } : n)),
-        })),
-      deleteNote: (id) =>
-        setData((d) => ({ ...d, notes: d.notes.filter((n) => n.id !== id) })),
-      addSale: (customerName, items) => {
-        const sale: Sale = { id: uid(), customerName, items, timestamp: Date.now() }
-        setData((d) => {
-          const products = d.products.map((p) => {
-            const item = items.find((i) => i.productId === p.id)
-            return item ? { ...p, quantity: Math.max(0, p.quantity - item.quantity) } : p
-          })
-          const movements = items.map(
-            (i) =>
-              ({
-                id: uid(),
-                productId: i.productId,
-                productName: i.productName,
-                delta: -i.quantity,
-                reason: "Venta",
-                note: customerName ? `Cliente: ${customerName}` : undefined,
-                timestamp: Date.now(),
-              }) as Movement,
-          )
-          return {
-            ...d,
-            sales: [sale, ...d.sales],
-            products,
-            movements: [...movements, ...d.movements].slice(0, 500),
-          }
-        })
-      },
-      deleteSale: (id) =>
-        setData((d) => {
-          const sale = d.sales.find((s) => s.id === id)
-          if (!sale) return d
-
-          const products = d.products.map((p) => {
-            const item = sale.items.find((i) => i.productId === p.id)
-            return item ? { ...p, quantity: p.quantity + item.quantity } : p
-          })
-
-          const movements = sale.items.map(
-            (i) =>
-              ({
-                id: uid(),
-                productId: i.productId,
-                productName: i.productName,
-                delta: i.quantity,
-                reason: "Ajuste",
-                note: sale.customerName
-                  ? `Anulación de venta: ${sale.customerName}`
-                  : "Anulación de venta",
-                timestamp: Date.now(),
-              }) as Movement,
-          )
-
-          return {
-            ...d,
-            sales: d.sales.filter((s) => s.id !== id),
-            products,
-            movements: [...movements, ...d.movements].slice(0, 500),
-          }
-        }),
-      addCustomer: (c) =>
-        setData((d) => ({ ...d, customers: [...d.customers, { ...c, id: uid() }] })),
-      updateCustomer: (id, patch) =>
-        setData((d) => ({
-          ...d,
-          customers: d.customers.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-        })),
-      deleteCustomer: (id) =>
-        setData((d) => ({
-          ...d,
-          customers: d.customers.filter((c) => c.id !== id),
-        })),
-      updateSettings: (patch) =>
-        setData((d) => ({ ...d, settings: { ...d.settings, ...patch } })),
-      toggleTheme: () =>
-        setData((d) => ({ ...d, theme: d.theme === "dark" ? "light" : "dark" })),
-      resetAppData: () => restoreDefaults(),
-      clearMovements: () => setData((d) => ({ ...d, movements: [] })),
-    }
-  }, [data, ready])
-
-  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+  return (
+    <StoreContext.Provider value={{ ...snapshot, connection, pending, send, signIn, signOut, reload }}>
+      {children}
+    </StoreContext.Provider>
+  )
 }
 
 export function useStore() {
-  const ctx = useContext(StoreContext)
-  if (!ctx) throw new Error("useStore must be used within StoreProvider")
-  return ctx
+  const context = useContext(StoreContext)
+  if (!context) throw new Error("useStore debe estar dentro de StoreProvider.")
+  return context
 }

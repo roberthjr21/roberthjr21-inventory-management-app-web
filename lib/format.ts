@@ -1,3 +1,5 @@
+import type { Sale } from "./types"
+
 export function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString("es-CO", {
     hour: "numeric",
@@ -14,34 +16,32 @@ export function formatDate(ts: number) {
   })
 }
 
-function formatShortDate(ts: number) {
-  return new Date(ts).toLocaleDateString("es-CO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  })
-}
-
-function isToday(ts: number) {
-  const d = new Date(ts)
-  const now = new Date()
-  return (
-    d.getDate() === now.getDate() &&
-    d.getMonth() === now.getMonth() &&
-    d.getFullYear() === now.getFullYear()
-  )
-}
-
 export function isThisWeek(ts: number) {
   const now = new Date()
   const start = new Date(now)
   const day = (now.getDay() + 6) % 7 // Monday = 0
   start.setDate(now.getDate() - day)
   start.setHours(0, 0, 0, 0)
-  return ts >= start.getTime()
+  const end = new Date(start)
+  end.setDate(start.getDate() + 7)
+  return ts >= start.getTime() && ts < end.getTime()
 }
 
 export function dayKey(ts: number) {
   const d = new Date(ts)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+
+
+export function formatAmount(amount: number, currency: string) {
+  return `${currency}${amount.toLocaleString("es-CO")}`
+}
+
+export function saleTotal(sale: Sale): number | undefined {
+  let total = 0
+  for (const item of sale.items) {
+    if (item.unitPrice === undefined) return undefined
+    total += item.quantity * item.unitPrice
+  }
+  return total
 }
